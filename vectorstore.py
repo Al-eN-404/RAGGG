@@ -160,7 +160,8 @@ def build_vectorstore(chunks):
         # Batch upload to Weaviate
         with collection.batch.dynamic() as batch:
             for i, chunk in enumerate(chunks):
-                vector = embeddings[i].tolist()  # Convert numpy array to list of floats
+                # Handle standard list or numpy array/tensor formats safely
+                vector = embeddings[i].tolist() if hasattr(embeddings[i], "tolist") else embeddings[i]
                 batch.add_object(
                     properties={
                         "text": chunk["text"],

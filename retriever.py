@@ -1,26 +1,40 @@
-from sentence_transformers import SentenceTransformer
-from vectorstore import get_weaviate_client
+import os
+from vectorstore import get_weaviate_client, get_huggingface_embeddings
+from weaviate.classes.query import Filter
 
-# Initialize the embedding model globally for fast retrieval response times
-model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-
-def retrieve(query, k=3):
-    # Encode query locally to get the embedding vector
-    query_embedding = model.encode(query)
+def retrieve(query, k=3, domain=None):
+    """
+    Search the Weaviate database using hybrid search (BM25 + Semantic).
+    Supports domain filtering for isolated multi-domain queries.
+    """
+    # Compute query vector via Hugging Face API
+    embeddings = get_huggingface_embeddings([query])
+    if not isinstance(embeddings, list) or len(embeddings) != 1:
+        raise ValueError("Failed to retrieve embedding vector for query.")
+    query_vector = embeddings[0]
     
     retrieved_chunks = []
     
     with get_weaviate_client() as client:
         collection_name = "WebsiteData"
         
-        # Get collection object
+        # Check if collection exists before querying
+        if not client.collections.exists(collection_name):
+            print(f"Collection '{collection_name}' does not exist.")
+            return retrieved_chunks
+            
         collection = client.collections.get(collection_name)
         
-        # Query Weaviate using the embedded query vector
-        response = collection.query.near_vector(
-            near_vector=query_embedding.tolist(),
+        # Determine filters if domain is supplied
+        filters = Filter.by_property("domain").equal(domain) if domain else None
+        
+        # Perform hybrid search
+        response = collection.query.hybrid(
+            query=query,
+            vector=query_vector,
+            alpha=0.5,  # Balanced hybrid search weighting
             limit=k,
-            return_properties=["text", "url"]
+            filters=filters
         )
         
         for obj in response.objects:
@@ -31,14 +45,11 @@ def retrieve(query, k=3):
             
     return retrieved_chunks
 
-if __name__=="__main__":
+if __name__ == "__main__":
+    # Test retriever
     query = "What is transport?"
-    try:
-        results = retrieve(query)
-        for i, chunk in enumerate(results):
-            print(f"\nResult {i+1}")
-            print(chunk["url"])
-            print(chunk["text"][:300])
-    except Exception as e:
-        print(f"Error querying Weaviate: {e}")
-        print("Please ensure your Weaviate instance is running and configured correctly.")
+    results = retrieve(query)
+    for i, chunk in enumerate(results):
+        print(f"\nResult {i+1}")
+        print(chunk["url"])
+        print(chunk["text"][:300])

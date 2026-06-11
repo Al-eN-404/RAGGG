@@ -1,87 +1,146 @@
 import os
 import weaviate
 import weaviate.classes as wvc
+from weaviate.classes.query import Filter
 from urllib.parse import urlparse
-from sentence_transformers import SentenceTransformer
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
+
+def get_secret(key_name, default=None):
+    try:
+        import streamlit as st
+        if key_name in st.secrets:
+            return st.secrets[key_name]
+    except Exception:
+        pass
+    return os.getenv(key_name, default)
+
+def get_huggingface_embeddings(texts):
+    """
+    Generate embeddings using Hugging Face's serverless Inference API.
+    If the API call fails or is unreachable, falls back to generating
+    embeddings locally using the sentence-transformers library.
+    """
+    is_single = isinstance(texts, str)
+    if is_single:
+        texts = [texts]
+        
+    try:
+        model_id = "sentence-transformers/all-MiniLM-L6-v2"
+        api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_id}"
+        
+        hf_token = get_secret("HF_TOKEN")
+        headers = {}
+        if hf_token:
+            headers["Authorization"] = f"Bearer {hf_token}"
+            
+        batch_size = 32
+        all_embeddings = []
+        
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            payload = {
+                "inputs": batch,
+                "options": {"wait_for_model": True}
+            }
+            
+            response = requests.post(api_url, headers=headers, json=payload, timeout=10)
+            
+            if response.status_code == 503:
+                import time
+                for _ in range(5):
+                    time.sleep(3)
+                    response = requests.post(api_url, headers=headers, json=payload, timeout=10)
+                    if response.status_code != 503:
+                        break
+                        
+            if response.status_code != 200:
+                raise Exception(f"Hugging Face API error ({response.status_code}): {response.text}")
+                
+            batch_embeddings = response.json()
+            if not isinstance(batch_embeddings, list):
+                raise ValueError(f"Unexpected embeddings format from Hugging Face API: {type(batch_embeddings)}")
+                
+            all_embeddings.extend(batch_embeddings)
+            
+        return all_embeddings[0] if is_single else all_embeddings
+        
+    except Exception as api_err:
+        print(f"Hugging Face Inference API failed: {api_err}. Falling back to local SentenceTransformer...")
+        try:
+            from sentence_transformers import SentenceTransformer
+            local_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+            local_embeddings = local_model.encode(texts, show_progress_bar=False)
+            
+            if hasattr(local_embeddings, "tolist"):
+                all_embeddings = local_embeddings.tolist()
+            else:
+                all_embeddings = [emb.tolist() if hasattr(emb, "tolist") else list(emb) for emb in local_embeddings]
+                
+            return all_embeddings[0] if is_single else all_embeddings
+        except Exception as local_err:
+            print(f"Local embedding generation also failed: {local_err}")
+            raise api_err
+
 
 def get_weaviate_client():
     """
     Establish a connection to the Weaviate v4 instance.
     Supports local Docker setup or Weaviate Cloud (WCD) cluster configuration.
     """
-    url = os.getenv("WEAVIATE_URL", "http://localhost:8080").strip()
-    api_key = os.getenv("WEAVIATE_API_KEY")
+    url = get_secret("WEAVIATE_URL", "http://localhost:8080").strip()
+    api_key = get_secret("WEAVIATE_API_KEY")
     
     # Auto-prepend scheme if missing
     if not url.startswith("http://") and not url.startswith("https://"):
-        if "localhost" in url or "127.0.0.1" in url:
-            url = "http://" + url
-        else:
-            url = "https://" + url
+        url = "https://" + url
             
-    parsed = urlparse(url)
-    host = parsed.hostname or "localhost"
-    port = parsed.port or 8080
-    
-    # Check if the endpoint points to Weaviate Cloud (WCD)
-    is_cloud = host.endswith(".weaviate.network") or host.endswith(".weaviate.cloud")
     auth = wvc.init.Auth.api_key(api_key) if api_key else None
     
-    if is_cloud:
-        return weaviate.connect_to_weaviate_cloud(
-            cluster_url=url,
-            auth_credentials=auth
-        )
-    else:
-        # Default to local or custom url
-        if host in ("localhost", "127.0.0.1"):
-            return weaviate.connect_to_local(
-                host=host,
-                port=port,
-                grpc_port=50051,
-                auth_credentials=auth
-            )
-        else:
-            return weaviate.connect_to_custom(
-                http_host=host,
-                http_port=port,
-                grpc_host=host,
-                grpc_port=50051,
-                http_secure=parsed.scheme == "https",
-                grpc_secure=parsed.scheme == "https",
-                auth_credentials=auth
-            )
+    return weaviate.connect_to_weaviate_cloud(
+        cluster_url=url,
+        auth_credentials=auth
+    )
 
 def build_vectorstore(chunks):
     """
-    Encode chunks locally using SentenceTransformer and upload them to Weaviate in batch.
+    Encode chunks using Hugging Face Inference API and upload them to Weaviate in batch.
+    Supports multi-domain storage by deleting only domain-specific documents.
     """
-    # Initialize the local embedding model
-    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-    
-    # Extract texts and compute embeddings locally
+    # Extract texts and compute embeddings using Hugging Face API
     texts = [chunk["text"] for chunk in chunks]
-    embeddings = model.encode(texts, show_progress_bar=True)
+    embeddings = get_huggingface_embeddings(texts)
     
+    target_domain = ""
+    if chunks:
+        target_domain = urlparse(chunks[0]["url"]).netloc
+        
     with get_weaviate_client() as client:
         collection_name = "WebsiteData"
         
-        # Delete if exists to rebuild fresh
+        # If collection exists, delete only the chunks corresponding to the target domain
         if client.collections.exists(collection_name):
-            client.collections.delete(collection_name)
+            collection = client.collections.get(collection_name)
+            if target_domain:
+                collection.data.delete_many(
+                    where=Filter.by_property("domain").equal(target_domain)
+                )
+        else:
+            # Create collection without server-side vectorizer (we supply vectors)
+            collection = client.collections.create(
+                name=collection_name,
+                properties=[
+                    wvc.config.Property(name="text", data_type=wvc.config.DataType.TEXT),
+                    wvc.config.Property(name="url", data_type=wvc.config.DataType.TEXT),
+                    wvc.config.Property(name="domain", data_type=wvc.config.DataType.TEXT),
+                ],
+                vectorizer_config=None
+            )
             
-        # Create collection without server-side vectorizer (we supply vectors)
-        collection = client.collections.create(
-            name=collection_name,
-            properties=[
-                wvc.config.Property(name="text", data_type=wvc.config.DataType.TEXT),
-                wvc.config.Property(name="url", data_type=wvc.config.DataType.TEXT),
-            ],
-            vectorizer_config=None
-        )
+        # Get collection instance (handles newly created or existing)
+        collection = client.collections.get(collection_name)
         
         # Batch upload to Weaviate
         with collection.batch.dynamic() as batch:
@@ -90,8 +149,9 @@ def build_vectorstore(chunks):
                 batch.add_object(
                     properties={
                         "text": chunk["text"],
-                        "url": chunk["url"]
+                        "url": chunk["url"],
+                        "domain": target_domain
                     },
                     vector=vector
                 )
-        print(f"Ingested {len(chunks)} chunks into Weaviate.")
+        print(f"Ingested {len(chunks)} chunks for domain '{target_domain}' into Weaviate.")

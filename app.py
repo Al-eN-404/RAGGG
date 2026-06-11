@@ -1,27 +1,16 @@
 import streamlit as st
-import requests
-import os
-from dotenv import load_dotenv
+from rag import ask_rag
+from scraper import crawl_website
+from chunker import chunk_pages
+from vectorstore import build_vectorstore
 
-# Load local environment variables if present
-load_dotenv()
-
-# Set up page configurations
+# Set page configuration
 st.set_page_config(
     page_title="RAG Web Chatbot",
     page_icon="💬",
     layout="wide",
-    initial_sidebar_state="auto"
+    initial_sidebar_state="auto"  # Automatically collapses on mobile, expanded on desktop
 )
-
-# Load endpoint URL and optional Hugging Face API token for auth
-HF_BACKEND_URL = os.getenv("HF_BACKEND_URL", "https://alenja002-ragg.hf.space").rstrip("/")
-HF_TOKEN = os.getenv("HF_TOKEN")
-
-# Setup auth headers if a token is present
-headers = {}
-if HF_TOKEN:
-    headers["Authorization"] = f"Bearer {HF_TOKEN}"
 
 # Custom CSS for a clean, premium, modern, and responsive aesthetic
 st.markdown("""
@@ -251,27 +240,20 @@ with st.sidebar:
                 else:
                     status = st.empty()
                     try:
-                        status.info("🕷️ Contacting API and crawling...")
-                        response = requests.post(
-                            f"{HF_BACKEND_URL}/index",
-                            json={"url": new_url, "max_pages": int(new_max_pages)},
-                            headers=headers,
-                            timeout=120
-                        )
-                        
-                        if response.status_code == 200:
-                            data = response.json()
-                            st.session_state.num_pages = data["pages_crawled"]
-                            st.session_state.num_chunks = data["chunks_created"]
+                        status.info("🕷️ Crawling...")
+                        pages = crawl_website(new_url, maxpages=new_max_pages)
+                        chunks = chunk_pages(pages)
+                        if not chunks:
+                            status.error("❌ No content extracted.")
+                        else:
+                            st.session_state.num_pages = len(pages)
+                            st.session_state.num_chunks = len(chunks)
                             st.session_state.current_url = new_url
+                            build_vectorstore(chunks)
                             status.success("✅ Re-indexed!")
                             st.rerun()
-                        else:
-                            # Show error response details
-                            err_detail = response.json().get("detail", response.text)
-                            status.error(f"❌ Ingestion failed: {err_detail}")
                     except Exception as e:
-                        status.error(f"❌ Error connecting to backend: {e}")
+                        status.error(f"❌ Error: {e}")
                         
         st.markdown("---")
         # Reset Session Button
@@ -284,7 +266,7 @@ with st.sidebar:
 
 # Main Body Panel (Onboarding Form or Chat Interface)
 if not st.session_state.ready:
-    # Onboarding Form in the Center
+    # Onboarding Form in the Center (extremely responsive on mobile)
     col_left, col_center, col_right = st.columns([1, 4, 1])
     with col_center:
         st.markdown("""
@@ -321,29 +303,30 @@ if not st.session_state.ready:
             else:
                 status = st.empty()
                 try:
-                    status.info("🕷️ Contacting API and crawling in parallel...")
-                    response = requests.post(
-                        f"{HF_BACKEND_URL}/index",
-                        json={"url": url, "max_pages": int(max_pages)},
-                        headers=headers,
-                        timeout=120
-                    )
+                    status.info("🕷️ Scraping pages in parallel...")
+                    pages = crawl_website(url, maxpages=max_pages)
                     
-                    if response.status_code == 200:
-                        data = response.json()
-                        st.session_state.num_pages = data["pages_crawled"]
-                        st.session_state.num_chunks = data["chunks_created"]
+                    status.info("✂️ Splitting content into chunks...")
+                    chunks = chunk_pages(pages)
+                    
+                    if not chunks:
+                        status.error("❌ Could not extract text from this website. Try another one.")
+                    else:
+                        st.session_state.num_pages = len(pages)
+                        st.session_state.num_chunks = len(chunks)
                         st.session_state.current_url = url
+                        
+                        status.info("⚡ Embedding and indexing into Weaviate...")
+                        build_vectorstore(chunks)
+                        
                         st.session_state.ready = True
                         status.success("✅ Knowledge base built successfully!")
                         st.rerun()
-                    else:
-                        err_detail = response.json().get("detail", response.text)
-                        status.error(f"❌ Ingestion failed: {err_detail}")
                 except Exception as e:
-                    status.error(f"❌ Error connecting to backend: {e}")
+                    status.error(f"❌ Error indexing site: {e}")
 else:
     # Chat Panel (Unlocks when ready)
+    # Render chat message history
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -359,36 +342,25 @@ else:
             st.markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        # Call RAG API backend and display response
+        # Call RAG pipeline and display response
         with st.chat_message("assistant"):
             with st.spinner("Searching knowledge base..."):
                 try:
-                    response = requests.post(
-                        f"{HF_BACKEND_URL}/query",
-                        json={"question": prompt},
-                        headers=headers,
-                        timeout=60
-                    )
+                    result = ask_rag(prompt)
+                    answer = result["answer"]
+                    sources = result["sources"]
                     
-                    if response.status_code == 200:
-                        data = response.json()
-                        answer = data["answer"]
-                        sources = data["sources"]
-                        
-                        st.markdown(answer)
-                        if sources:
-                            with st.expander("📚 View Reference Sources", expanded=False):
-                                for src in sources:
-                                    st.markdown(f"- [{src}]({src})")
-                        
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": answer,
-                            "sources": sources
-                        })
-                    else:
-                        err_detail = response.json().get("detail", response.text)
-                        st.error(f"Error querying backend API: {err_detail}")
+                    st.markdown(answer)
+                    if sources:
+                        with st.expander("📚 View Reference Sources", expanded=False):
+                            for src in sources:
+                                st.markdown(f"- [{src}]({src})")
+                    
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": answer,
+                        "sources": sources
+                    })
                 except Exception as e:
                     err_msg = f"Sorry, I encountered an error while searching the database: {e}"
                     st.error(err_msg)

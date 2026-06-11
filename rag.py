@@ -3,7 +3,6 @@ from dotenv import load_dotenv
 from retriever import retrieve
 
 import os
-# import content
 
 load_dotenv()
 
@@ -33,8 +32,6 @@ llm = ChatOpenAI(
     api_key=get_api_key(),
     base_url="https://api.groq.com/openai/v1"
 )
-
-
 
 def ask_rag(question, domain=None):
     """
@@ -91,37 +88,3 @@ Context:
         "answer_stream": answer_stream,
         "sources": sources
     }
-
-
-
-# question = "What is transport?"
-
-# while True:
-
-#     question = input("\nAsk: ")
-
-#     if question.lower() == "exit":
-#         break
-
-#     retrieved_chunks = retrieve(question)
-
-#     context = "\n\n".join(
-#         chunk["text"]
-#         for chunk in retrieved_chunks
-#     )
-
-#     prompt = f"""
-#     Answer ONLY using the provided context.
-
-#     Context:
-#     {context}
-
-#     Question:
-#     {question}
-#     """
-
-#     response = llm.invoke(prompt)
-
-#     print("\nAnswer:")
-#     print(response.content)
-    

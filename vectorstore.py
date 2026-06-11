@@ -120,10 +120,25 @@ def build_vectorstore(chunks):
     with get_weaviate_client() as client:
         collection_name = "WebsiteData"
         
-        # If collection exists, delete only the chunks corresponding to the target domain
+        # If collection exists, verify it has the 'domain' property
         if client.collections.exists(collection_name):
             collection = client.collections.get(collection_name)
-            if target_domain:
+            config = collection.config.get()
+            has_domain = any(prop.name == "domain" for prop in config.properties)
+            
+            if not has_domain:
+                print(f"Collection '{collection_name}' is missing 'domain' property. Recreating collection...")
+                client.collections.delete(collection_name)
+                collection = client.collections.create(
+                    name=collection_name,
+                    properties=[
+                        wvc.config.Property(name="text", data_type=wvc.config.DataType.TEXT),
+                        wvc.config.Property(name="url", data_type=wvc.config.DataType.TEXT),
+                        wvc.config.Property(name="domain", data_type=wvc.config.DataType.TEXT),
+                    ],
+                    vectorizer_config=None
+                )
+            elif target_domain:
                 collection.data.delete_many(
                     where=Filter.by_property("domain").equal(target_domain)
                 )

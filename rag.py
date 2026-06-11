@@ -83,12 +83,12 @@ Context:
         {"role": "user", "content": question}
     ]
 
-    # Stream the response from the LLM
-    stream = llm.stream(messages)
-    answer_stream = (chunk.content for chunk in stream if chunk.content)
+    # Invoke the LLM to get the complete response
+    response = llm.invoke(messages)
+    answer = response.content
 
     return {
-        "answer_stream": answer_stream,
+        "answer": answer,
         "sources": sources
     }
 

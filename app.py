@@ -268,14 +268,7 @@ if not st.session_state.ready:
     # Onboarding Form in the Center (extremely responsive on mobile)
     col_left, col_center, col_right = st.columns([1, 4, 1])
     with col_center:
-        st.markdown("""
-        <div class="onboarding-card">
-            <div style="font-size: 2.8rem; margin-bottom: 0.8rem;">🌐</div>
-            <h3 style="margin: 0 0 0.5rem 0; font-family: 'Outfit', sans-serif; font-weight: 700; color: #1e3c72; font-size: 1.5rem;">Setup Your Knowledge Base</h3>
-            <p style="margin: 0; color: #64748b; font-size: 0.95rem; line-height: 1.5;">Enter the URL of the website you want to scrape and query. Once processed, you can converse with its content instantly.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
+       
         url = st.text_input(
             "Website URL",
             placeholder="https://example.com",

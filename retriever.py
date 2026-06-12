@@ -45,11 +45,3 @@ def retrieve(query, k=3, domain=None):
             
     return retrieved_chunks
 
-if __name__ == "__main__":
-    # Test retriever
-    query = "What is transport?"
-    results = retrieve(query)
-    for i, chunk in enumerate(results):
-        print(f"\nResult {i+1}")
-        print(chunk["url"])
-        print(chunk["text"][:300])

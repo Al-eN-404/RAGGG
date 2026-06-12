@@ -9,7 +9,7 @@ st.set_page_config(
     page_title="RAG Web Chatbot",
     page_icon="💬",
     layout="wide",
-    initial_sidebar_state="auto" 
+    initial_sidebar_state="auto" )
 
 # CSS for a clean, and responsive 
 st.markdown("""

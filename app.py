@@ -9,10 +9,9 @@ st.set_page_config(
     page_title="RAG Web Chatbot",
     page_icon="💬",
     layout="wide",
-    initial_sidebar_state="auto"  # Automatically collapses on mobile, expanded on desktop
-)
+    initial_sidebar_state="auto" 
 
-# Custom CSS for a clean, premium, modern, and responsive aesthetic
+# CSS for a clean, and responsive 
 st.markdown("""
 <style>
     /* Load professional typography */
@@ -180,7 +179,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Render Custom Header
+# Render Header
 st.markdown("""
 <div class="header-container">
     <h1 class="header-title">💬 Web RAG Chatbot</h1>
@@ -200,7 +199,7 @@ if "num_chunks" not in st.session_state:
 if "current_url" not in st.session_state:
     st.session_state.current_url = ""
 
-# Sidebar - Configuration and Ingestion
+# Sidebar 
 with st.sidebar:
     st.markdown('<p class="sidebar-title">🌐 Knowledge base</p>', unsafe_allow_html=True)
     
@@ -208,7 +207,7 @@ with st.sidebar:
         st.markdown('<div class="status-badge"><span class="pulse-dot"></span>Index Live</div>', unsafe_allow_html=True)
         st.markdown("### 📊 Index Statistics")
         
-        # Clean dashboard columns inside the sidebar
+        
         col1, col2 = st.columns(2)
         with col1:
             st.metric("Pages Crawled", st.session_state.num_pages)

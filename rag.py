@@ -8,10 +8,10 @@ import os
 load_dotenv()
 
 def get_api_key():
-    # Try multiple standard keys from streamlit secrets or env variables
+   
     keys = ["API-KEY", "GROQ_API_KEY", "API_KEY", "OPENAI_API_KEY"]
     
-    # 1. Try Streamlit Secrets (for Streamlit Cloud deployment)
+    #  Streamlit Secrets 
     try:
         import streamlit as st
         for key in keys:
@@ -20,7 +20,7 @@ def get_api_key():
     except Exception:
         pass
         
-    # 2. Try environment variables (for local deployment / env files)
+    # Try environment variables 
     for key in keys:
         val = os.getenv(key)
         if val:
@@ -92,36 +92,4 @@ Context:
         "sources": sources
     }
 
-
-
-# question = "What is transport?"
-
-# while True:
-
-#     question = input("\nAsk: ")
-
-#     if question.lower() == "exit":
-#         break
-
-#     retrieved_chunks = retrieve(question)
-
-#     context = "\n\n".join(
-#         chunk["text"]
-#         for chunk in retrieved_chunks
-#     )
-
-#     prompt = f"""
-#     Answer ONLY using the provided context.
-
-#     Context:
-#     {context}
-
-#     Question:
-#     {question}
-#     """
-
-#     response = llm.invoke(prompt)
-
-#     print("\nAnswer:")
-#     print(response.content)
     
